@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -89,19 +88,22 @@ const App: React.FC = () => {
         setLoadingMessage('Synchronizing Initial Records...');
         await handleSyncMembers(groupId, result.mappings);
         
-        // Finalize Workspace Creation: Redirect to Login
         setLoadingMessage('Securing Workspace Architecture...');
         setTimeout(async () => {
           await dbService.logout();
           setCurrentUser(null);
           setIsGlobalLoading(false);
-          // Note: We don't change tabs here because we want the user to land on the dashboard after login
           setCurrentTab('dashboard');
         }, 1500);
+      } else {
+        // Critical: Reset loading if service returns null
+        setIsGlobalLoading(false);
+        alert('Failed to initialize group node. Verify the Group ID and ensure your API Key is correctly configured in Vercel.');
       }
     } catch (error) {
       console.error("Link Group Error:", error);
       setIsGlobalLoading(false);
+      alert('A critical error occurred during deployment. Check the browser console for details.');
     }
   };
 
@@ -111,25 +113,25 @@ const App: React.FC = () => {
     
     if (!targetId || targetMappings.length === 0) return;
 
-    // Only set loading if not already in global loading (workspace creation)
     if (!isGlobalLoading) setIsGlobalLoading(true);
     
     try {
       const realMembers = await geminiService.fetchMembers(targetId, targetMappings);
       
-      setStaff(prev => {
-        const existingIds = new Set(prev.map(s => s.robloxId));
-        const filteredNew = realMembers.filter(m => !existingIds.has(m.robloxId)).map(m => ({
-          ...m,
-          totalMinutes: Math.floor(Math.random() * 500), 
-          isClockedIn: Math.random() > 0.8 
-        }));
-        return [...prev, ...filteredNew];
-      });
+      if (realMembers && realMembers.length > 0) {
+        setStaff(prev => {
+          const existingIds = new Set(prev.map(s => s.robloxId));
+          const filteredNew = realMembers.filter(m => !existingIds.has(m.robloxId)).map(m => ({
+            ...m,
+            totalMinutes: Math.floor(Math.random() * 500), 
+            isClockedIn: Math.random() > 0.8 
+          }));
+          return [...prev, ...filteredNew];
+        });
+      }
     } catch (error) {
       console.error("Sync Members Error:", error);
     } finally {
-      // Only release if we aren't waiting for the workspace finalization redirect
       if (loadingMessage !== 'Securing Workspace Architecture...') {
         setIsGlobalLoading(false);
       }
