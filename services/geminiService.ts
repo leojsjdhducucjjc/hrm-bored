@@ -1,15 +1,9 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { StaffMember, RankMapping, StaffRank, StaffStatus } from "../types";
 
 export class GeminiService {
-  private ai: GoogleGenAI;
   // Using a robust CORS proxy
   private proxyUrl = 'https://corsproxy.io/?';
-
-  constructor() {
-    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-  }
 
   private async fetchRoblox(url: string) {
     try {
@@ -27,7 +21,12 @@ export class GeminiService {
     }
   }
 
+  /**
+   * Fetches real group roles and uses AI to map them to internal ranks.
+   */
   async fetchGroupMetadata(groupId: string): Promise<{ groupName: string; mappings: RankMapping[] } | null> {
+    // Instantiate per-call to ensure latest API key is used
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     try {
       // 1. Try to fetch real roles and group info from Roblox API
       const [rolesData, groupData] = await Promise.all([
@@ -54,7 +53,7 @@ export class GeminiService {
         The label should be the original Roblox rank name.
       `;
 
-      const aiResponse = await this.ai.models.generateContent({
+      const aiResponse = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: prompt,
         config: {
@@ -85,14 +84,18 @@ export class GeminiService {
     }
   }
 
+  /**
+   * Fallback method using AI to generate realistic roles when API fails.
+   */
   private async fetchGroupRolesAI(groupId: string): Promise<{ groupName: string; mappings: RankMapping[] } | null> {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const prompt = `
       The user is trying to integrate Roblox Group ID "${groupId}" into an HRM platform.
       Provide a highly realistic rank structure for this Roblox group ID.
       Return a JSON object with groupName and mappings array.
     `;
     try {
-      const response = await this.ai.models.generateContent({
+      const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: prompt,
         config: {
@@ -168,12 +171,16 @@ export class GeminiService {
     }
   }
 
+  /**
+   * Analyzes specific staff performance using complex reasoning model.
+   */
   async analyzeStaffPerformance(staff: StaffMember) {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const logsString = staff.logs.map(l => `${l.date}: [${l.type}] ${l.description} (by ${l.issuer})`).join('\n');
     const prompt = `Analyze performance: ${staff.username} (${staff.rank}). Logs: ${logsString || "None"}.`;
     try {
-      const response = await this.ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview', // Upgraded to Pro for complex reasoning tasks
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -195,11 +202,15 @@ export class GeminiService {
     }
   }
 
+  /**
+   * Audits entire staff body for strategic insights using complex reasoning.
+   */
   async getGlobalStaffInsights(allStaff: StaffMember[]) {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const data = allStaff.map(s => ({ user: s.username, rank: s.rank, points: s.totalPoints }));
     try {
-      const response = await this.ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview', // Upgraded to Pro for strategic auditing
         contents: `Audit this staff body: ${JSON.stringify(data)}`,
         config: { systemInstruction: "Strategic HR Consultant specializing in online communities." }
       });
