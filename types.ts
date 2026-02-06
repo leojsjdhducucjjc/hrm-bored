@@ -1,19 +1,19 @@
 
-export enum StaffRank {
-  CHIEF_EXECUTIVE = 'Chief Executive Officer',
-  HR_DIRECTOR = 'HR Director',
-  MANAGER = 'Manager',
-  SUPERVISOR = 'Supervisor',
-  SENIOR_STAFF = 'Senior Staff',
-  JUNIOR_STAFF = 'Junior Staff',
-  TRAINEE = 'Trainee'
-}
-
 export enum StaffStatus {
   ACTIVE = 'Active',
   ON_LEAVE = 'On Leave',
   SUSPENDED = 'Suspended',
   RETIRED = 'Retired'
+}
+
+// Added missing StaffRank enum to fix module import errors
+export enum StaffRank {
+  CHIEF_EXECUTIVE = 'Executive',
+  MANAGER = 'Management',
+  SUPERVISOR = 'Supervisor',
+  SENIOR_STAFF = 'Senior Staff',
+  STAFF = 'Staff',
+  TRAINEE = 'Trainee'
 }
 
 export interface AuthUser {
@@ -31,11 +31,17 @@ export interface PerformanceLog {
   issuer: string;
 }
 
+export interface WorkspaceRole {
+  id: string;
+  name: string;
+  color: string;
+}
+
 export interface StaffMember {
   id: string;
   robloxId: number;
   username: string;
-  rank: StaffRank;
+  rank: string; // Now a dynamic string matching a WorkspaceRole name
   status: StaffStatus;
   joinedDate: string;
   totalPoints: number;
@@ -56,7 +62,7 @@ export interface HRMStats {
 
 export interface RankMapping {
   robloxRankId: number;
-  internalRank: StaffRank;
+  internalRank: string; // References WorkspaceRole ID
   label: string;
 }
 
@@ -65,4 +71,5 @@ export interface GroupConfig {
   groupName: string;
   isConnected: boolean;
   rankMappings: RankMapping[];
+  customRanks: WorkspaceRole[];
 }

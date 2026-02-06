@@ -7,15 +7,25 @@ import StaffDetailModal from './components/StaffDetailModal';
 import IntegrationPanel from './components/IntegrationPanel';
 import Loader from './components/Loader';
 import Login from './components/Login';
-import { StaffMember, HRMStats, GroupConfig, StaffRank, StaffStatus, AuthUser } from './types';
+import WelcomeSetup from './components/WelcomeSetup';
+import { StaffMember, HRMStats, GroupConfig, StaffStatus, AuthUser, WorkspaceRole } from './types';
 import { geminiService } from './services/geminiService';
 import { dbService } from './services/databaseService';
+
+const DEFAULT_ROLES: WorkspaceRole[] = [
+  { id: 'r1', name: 'Executive', color: '#8b5cf6' },
+  { id: 'r2', name: 'Management', color: '#3b82f6' },
+  { id: 'r3', name: 'Supervisor', color: '#6366f1' },
+  { id: 'r4', name: 'Staff', color: '#94a3b8' },
+  { id: 'r5', name: 'Trainee', color: '#f59e0b' },
+];
 
 const INITIAL_GROUP_CONFIG: GroupConfig = {
   groupId: '',
   groupName: '',
   isConnected: false,
-  rankMappings: []
+  rankMappings: [],
+  customRanks: DEFAULT_ROLES
 };
 
 const App: React.FC = () => {
@@ -28,9 +38,9 @@ const App: React.FC = () => {
   const [globalInsights, setGlobalInsights] = useState<string | null>(null);
   const [loadingInsights, setLoadingInsights] = useState(false);
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('Processing Data...');
   const [groupConfig, setGroupConfig] = useState<GroupConfig>(INITIAL_GROUP_CONFIG);
 
-  // Persistence: Check Session
   useEffect(() => {
     const checkSession = async () => {
       const user = await dbService.getSession();
@@ -39,8 +49,7 @@ const App: React.FC = () => {
       const savedStaff = await dbService.loadStaff();
       if (savedStaff.length > 0) {
         setStaff(savedStaff);
-        // If staff exists, we assume a group was previously linked
-        // In a real app, you'd save groupConfig to DB too
+        setGroupConfig(prev => ({ ...prev, isConnected: true }));
       }
       
       setIsAuthLoading(false);
@@ -48,7 +57,6 @@ const App: React.FC = () => {
     checkSession();
   }, []);
 
-  // Persistence: Auto-save staff changes
   useEffect(() => {
     if (staff.length > 0) {
       dbService.saveStaff(staff);
@@ -65,21 +73,34 @@ const App: React.FC = () => {
 
   const handleLinkGroup = async (groupId: string) => {
     if (!groupId) return;
+    setLoadingMessage('Deploying HRM Node...');
     setIsGlobalLoading(true);
     try {
       const result = await geminiService.fetchGroupMetadata(groupId);
       if (result) {
         setGroupConfig({
+          ...groupConfig,
           groupId,
           groupName: result.groupName,
           isConnected: true,
           rankMappings: result.mappings
         });
+        
+        setLoadingMessage('Synchronizing Initial Records...');
         await handleSyncMembers(groupId, result.mappings);
+        
+        // Finalize Workspace Creation: Redirect to Login
+        setLoadingMessage('Securing Workspace Architecture...');
+        setTimeout(async () => {
+          await dbService.logout();
+          setCurrentUser(null);
+          setIsGlobalLoading(false);
+          // Note: We don't change tabs here because we want the user to land on the dashboard after login
+          setCurrentTab('dashboard');
+        }, 1500);
       }
     } catch (error) {
       console.error("Link Group Error:", error);
-    } finally {
       setIsGlobalLoading(false);
     }
   };
@@ -90,7 +111,9 @@ const App: React.FC = () => {
     
     if (!targetId || targetMappings.length === 0) return;
 
-    setIsGlobalLoading(true);
+    // Only set loading if not already in global loading (workspace creation)
+    if (!isGlobalLoading) setIsGlobalLoading(true);
+    
     try {
       const realMembers = await geminiService.fetchMembers(targetId, targetMappings);
       
@@ -106,7 +129,10 @@ const App: React.FC = () => {
     } catch (error) {
       console.error("Sync Members Error:", error);
     } finally {
-      setIsGlobalLoading(false);
+      // Only release if we aren't waiting for the workspace finalization redirect
+      if (loadingMessage !== 'Securing Workspace Architecture...') {
+        setIsGlobalLoading(false);
+      }
     }
   };
 
@@ -118,6 +144,8 @@ const App: React.FC = () => {
   const handleLogout = async () => {
     await dbService.logout();
     setCurrentUser(null);
+    setGroupConfig(INITIAL_GROUP_CONFIG);
+    setStaff([]);
   };
 
   const fetchGlobalInsights = async () => {
@@ -129,59 +157,71 @@ const App: React.FC = () => {
   };
 
   if (isAuthLoading) return <Loader message="Validating Credentials..." />;
-
+  
   if (!currentUser) return <Login onLoginSuccess={setCurrentUser} />;
 
+  if (!groupConfig.isConnected) {
+    return (
+      <div className="bg-slate-950 min-h-screen">
+        {isGlobalLoading && <Loader message={loadingMessage} />}
+        <WelcomeSetup onLink={handleLinkGroup} loading={isGlobalLoading} />
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-screen animate-in fade-in duration-1000">
+    <div className="flex min-h-screen animate-in fade-in duration-1000 bg-slate-950">
       <Sidebar 
         currentTab={currentTab} 
         setCurrentTab={setCurrentTab} 
         user={currentUser} 
         onLogout={handleLogout}
+        groupConnected={groupConfig.isConnected}
       />
       
-      {isGlobalLoading && <Loader message="Synchronizing with Roblox API..." />}
+      {isGlobalLoading && <Loader message={loadingMessage} />}
 
-      <main className="flex-1 p-8 overflow-y-auto bg-slate-950">
+      <main className="flex-1 p-8 overflow-y-auto">
         <header className="flex justify-between items-center mb-10">
           <div>
             <h2 className="text-4xl font-black text-slate-100 uppercase tracking-tighter italic">{currentTab.replace('-', ' ')}</h2>
             <p className="text-slate-500 mt-1 font-bold uppercase tracking-widest text-xs">
-              {currentTab === 'dashboard' && 'Live Performance Synthesis'}
-              {currentTab === 'staff' && 'Personnel Logistics & Records'}
-              {currentTab === 'ai' && 'Strategic Predictive Intelligence'}
-              {currentTab === 'integration' && 'Roblox Edge API Configuration'}
-              {currentTab === 'settings' && 'Instance Parameters'}
+              {currentTab === 'dashboard' ? 'Live Performance Synthesis' :
+                currentTab === 'staff' ? 'Personnel Logistics & Records' :
+                currentTab === 'ai' ? 'Strategic Predictive Intelligence' :
+                currentTab === 'integration' ? 'Roblox Edge API Configuration' : 'Instance Parameters'
+              }
             </p>
           </div>
           
           <div className="flex items-center gap-6">
             <div className="hidden md:flex flex-col items-right text-right">
                <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Database Node</span>
-               <span className="text-xs font-mono font-bold text-indigo-400">neon-us-east-2</span>
+               <span className="text-xs font-mono font-bold text-indigo-400">nexus-primary-node</span>
             </div>
             
             <div className="flex items-center gap-4 bg-slate-900/50 px-6 py-3.5 rounded-[1.25rem] border border-white/5 shadow-2xl">
               <div className="flex items-center gap-2">
                 <span className="flex h-2.5 w-2.5 relative">
-                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${groupConfig.isConnected ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
-                    <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${groupConfig.isConnected ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
+                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-emerald-400`}></span>
+                    <span className={`relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500`}></span>
                 </span>
                 <span className="text-[10px] font-black text-slate-100 uppercase tracking-[0.2em]">
-                  {groupConfig.isConnected ? 'Stream Active' : 'Offline Mode'}
+                  Stream Active
                 </span>
               </div>
               <div className="h-6 w-px bg-white/10" />
-              <span className="text-xs font-mono font-bold text-blue-500">GID:{groupConfig.groupId || '---'}</span>
+              <span className="text-xs font-mono font-bold text-blue-500">GID:{groupConfig.groupId}</span>
             </div>
           </div>
         </header>
 
-        {currentTab === 'dashboard' && <Dashboard staff={staff} stats={stats} />}
+        {currentTab === 'dashboard' && <Dashboard staff={staff} stats={stats} roles={groupConfig.customRanks} />}
+        
         {currentTab === 'staff' && (
           <StaffList 
             staff={staff} 
+            roles={groupConfig.customRanks}
             onViewDetails={(member) => setSelectedStaff(member)} 
           />
         )}
@@ -213,11 +253,7 @@ const App: React.FC = () => {
                     >
                         {loadingInsights ? 'Synthesizing Workforce Data...' : 'Execute Full Instance Audit'}
                     </button>
-                    {staff.length === 0 && (
-                      <p className="text-white/40 text-[10px] mt-6 font-black uppercase italic tracking-[0.2em]">Connect a group to enable intelligence analytics.</p>
-                    )}
                 </div>
-                {/* Background Flare */}
                 <div className="absolute top-[-20%] right-[-10%] w-[600px] h-[600px] bg-blue-400 blur-[140px] rounded-full opacity-20 group-hover:opacity-30 transition-opacity pointer-events-none" />
             </div>
 
@@ -250,19 +286,6 @@ const App: React.FC = () => {
                     <label className="block text-[10px] font-black text-slate-600 uppercase mb-3 group-hover:text-blue-400 transition-colors tracking-widest">Platform Label</label>
                     <input type="text" defaultValue="Nexus HRM Enterprise" className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-white font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all" />
                 </div>
-                <div>
-                    <label className="block text-[10px] font-black text-slate-600 uppercase mb-3 tracking-widest">Visual DNA</label>
-                    <div className="grid grid-cols-2 gap-6">
-                      <button className="p-6 bg-blue-600/10 border-2 border-blue-500 rounded-[2rem] text-left shadow-xl shadow-blue-900/20">
-                        <p className="font-black text-white uppercase tracking-tighter italic">Deep Indigo</p>
-                        <p className="text-[10px] text-blue-400 font-black uppercase mt-2">Active Schema</p>
-                      </button>
-                      <button className="p-6 bg-white/5 border-2 border-transparent rounded-[2rem] text-left hover:border-white/10 transition-all opacity-40 group">
-                        <p className="font-black text-slate-400 uppercase tracking-tighter italic group-hover:text-slate-200">Monochrome</p>
-                        <p className="text-[10px] text-slate-600 font-black uppercase mt-2">Legacy Schema</p>
-                      </button>
-                    </div>
-                </div>
                 <div className="pt-6">
                     <button className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-6 rounded-[1.5rem] font-black uppercase tracking-[0.3em] text-xs transition-all shadow-xl shadow-indigo-900/40 active:scale-[0.98]">Deploy Global Update</button>
                 </div>
@@ -273,6 +296,7 @@ const App: React.FC = () => {
 
       <StaffDetailModal 
         staff={selectedStaff} 
+        roles={groupConfig.customRanks}
         onClose={() => setSelectedStaff(null)} 
         onUpdateStaff={handleUpdateStaff}
       />
